@@ -1,0 +1,50 @@
+### Variáveis
+@baseUrl = http://localhost:3000
+
+### Busca paginada de CNPJs (sem filtro)
+GET {{baseUrl}}/api/cnpj?page=1&limit=10
+Content-Type: application/json
+
+### Busca por termo (CNPJ, razão social, nome fantasia ou sócio)
+GET {{baseUrl}}/api/cnpj?termo=EM RECUPERACAO&page=1&limit=10
+Content-Type: application/json
+
+### Busca com múltiplos filtros
+GET {{baseUrl}}/api/cnpj?termo=COMERCIO&uf=SP&situacao=02&page=1&limit=10
+Content-Type: application/json
+
+### Busca por CNAE específico
+GET {{baseUrl}}/api/cnpj?cnae=4712100&page=1&limit=10
+Content-Type: application/json
+
+### Busca detalhada por CNPJ específico
+GET {{baseUrl}}/api/cnpj/12345678000199
+Content-Type: application/json
+
+### Busca detalhada por CNPJ específico (com formatação)
+GET {{baseUrl}}/api/cnpj/12.345.678/0001-99
+Content-Type: application/json
+
+### Obter lista de CNAEs (para filtros)
+GET {{baseUrl}}/api/auxiliares/cnae
+Content-Type: application/json
+
+### Obter lista de municípios (para filtros)
+GET {{baseUrl}}/api/auxiliares/municipios
+Content-Type: application/json
+
+### Obter lista de naturezas jurídicas (para filtros)
+GET {{baseUrl}}/api/auxiliares/naturezas_juridicas
+Content-Type: application/json
+
+### Obter lista de países (para filtros)
+GET {{baseUrl}}/api/auxiliares/paises
+Content-Type: application/json
+
+### Obter lista de qualificações (para filtros)
+GET {{baseUrl}}/api/auxiliares/qualificacoes
+Content-Type: application/json
+
+### Obter lista de motivos de situação cadastral (para filtros)
+GET {{baseUrl}}/api/auxiliares/motivos
+Content-Type: application/json
