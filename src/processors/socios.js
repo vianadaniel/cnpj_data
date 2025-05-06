@@ -1,4 +1,5 @@
 const fs = require('fs');
+const csv = require('csv-parser');
 
 /**
  * Processa um arquivo de Sócios e insere os dados no banco de dados
@@ -25,86 +26,65 @@ async function processSociosFile(db, filePath) {
         `);
 
         // Processar em lotes para melhor performance
-        const batchSize = 50000; // Reduced batch size for more frequent commits
+        const batchSize = 5000000; // Reduced batch size for more frequent commits
         let processed = 0;
-        let lineBuffer = '';
 
         // Start transaction
         await db.run('BEGIN TRANSACTION');
 
-        // Criar stream de leitura
-        const readStream = fs.createReadStream(filePath, { encoding: 'latin1' });
-
         await new Promise((resolve, reject) => {
-            readStream.on('data', async (chunk) => {
+            const stream = fs.createReadStream(filePath, { encoding: 'latin1' })
+                .pipe(csv({
+                    separator: ';',
+                    headers: [
+                        'cnpj_basico', 'identificador_socio', 'nome_socio', 'cnpj_cpf_socio',
+                        'qualificacao_socio', 'data_entrada_sociedade', 'pais', 'representante_legal',
+                        'nome_representante', 'qualificacao_representante', 'faixa_etaria'
+                    ],
+                    skipLines: 0
+                }));
+
+            // Handle data events
+            stream.on('data', async (row) => {
                 try {
-                    // Pausar o stream para processar o chunk
-                    readStream.pause();
+                    // Pause the stream while we process this row
+                    stream.pause();
 
-                    lineBuffer += chunk;
-                    const lines = lineBuffer.split('\n');
+                    await stmt.run(
+                        row.cnpj_basico,
+                        row.identificador_socio,
+                        row.nome_socio,
+                        row.cnpj_cpf_socio,
+                        row.qualificacao_socio,
+                        row.data_entrada_sociedade,
+                        row.pais,
+                        row.representante_legal,
+                        row.nome_representante,
+                        row.qualificacao_representante,
+                        row.faixa_etaria
+                    );
 
-                    // O último elemento pode ser uma linha incompleta
-                    lineBuffer = lines.pop() || '';
+                    processed++;
 
-                    for (const line of lines) {
-                        if (!line.trim()) continue;
+                    if (processed % batchSize === 0) {
+                        await db.run('COMMIT');
+                        await db.run('BEGIN TRANSACTION');
+                        console.log(`Processados ${processed} registros de socios`);
 
-                        // Parse da linha conforme layout dos dados
-                        const fields = line.split(';').map(field => field.replace(/^"|"$/g, ''));
-
-                        if (fields.length < 11) continue; // Ignorar linhas inválidas
-
-                        await stmt.run(
-                            fields[0],  // cnpj_basico
-                            fields[1],  // identificador_socio
-                            fields[2],  // nome_socio
-                            fields[3],  // cnpj_cpf_socio
-                            fields[4],  // qualificacao_socio
-                            fields[5],  // data_entrada_sociedade
-                            fields[6],  // pais
-                            fields[7],  // representante_legal
-                            fields[8],  // nome_representante
-                            fields[9],  // qualificacao_representante
-                            fields[10]  // faixa_etaria
-                        );
-
-                        processed++;
-
-                        if (processed % batchSize === 0) {
-                            await db.run('COMMIT');
-                            await db.run('BEGIN TRANSACTION');
-                            console.log(`Processados ${processed} registros de socios`);
-
-                            // Add a checkpoint to ensure WAL is written to the main database file
-                            await db.run('PRAGMA wal_checkpoint(PASSIVE)');
-                        }
+                        // Add a checkpoint to ensure WAL is written to the main database file
+                        await db.run('PRAGMA wal_checkpoint(PASSIVE)');
                     }
 
-                    // Retomar o stream
-                    readStream.resume();
+                    // Resume the stream
+                    stream.resume();
                 } catch (err) {
-                    readStream.destroy(); // Ensure stream is closed on error
+                    stream.destroy(err);
                     reject(err);
                 }
             });
 
-            readStream.on('end', async () => {
+            stream.on('end', async () => {
                 try {
-                    // Processar qualquer linha restante no buffer
-                    if (lineBuffer.trim()) {
-                        const fields = lineBuffer.trim().split(';').map(field => field.replace(/^"|"$/g, ''));
-
-                        if (fields.length >= 11) {
-                            await stmt.run(
-                                fields[0], fields[1], fields[2], fields[3], fields[4],
-                                fields[5], fields[6], fields[7], fields[8], fields[9],
-                                fields[10]
-                            );
-                            processed++;
-                        }
-                    }
-
                     // Commit any remaining changes
                     await db.run('COMMIT');
                     console.log(`Processamento concluído. Total de ${processed} registros.`);
@@ -118,7 +98,7 @@ async function processSociosFile(db, filePath) {
                 }
             });
 
-            readStream.on('error', (err) => {
+            stream.on('error', (err) => {
                 reject(err);
             });
         });
