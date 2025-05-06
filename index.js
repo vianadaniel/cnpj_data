@@ -53,5 +53,119 @@ async function main() {
     }
 }
 
+const json = {
+    "Cnaes": [
+        "/home/viana/Documents/cnpj_data/dados/F.K03200$Z.D50419.CNAECSV"
+    ],
+    "Empresas0": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y0.D50419.EMPRECSV"
+    ],
+    "Empresas1": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y1.D50419.EMPRECSV"
+    ],
+    "Empresas2": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y2.D50419.EMPRECSV"
+    ],
+    "Empresas3": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y3.D50419.EMPRECSV"
+    ],
+    "Empresas4": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y4.D50419.EMPRECSV"
+    ],
+    "Empresas5": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y5.D50419.EMPRECSV"
+    ],
+    "Empresas6": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y6.D50419.EMPRECSV"
+    ],
+    "Empresas7": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y7.D50419.EMPRECSV"
+    ],
+    "Empresas8": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y8.D50419.EMPRECSV"
+    ],
+    "Empresas9": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y9.D50419.EMPRECSV"
+    ],
+    "Estabelecimentos0": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y0.D50419.ESTABELE"
+    ],
+    "Estabelecimentos1": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y1.D50419.ESTABELE"
+    ],
+    "Estabelecimentos2": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y2.D50419.ESTABELE"
+    ],
+    "Estabelecimentos3": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y3.D50419.ESTABELE"
+    ],
+    "Estabelecimentos4": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y4.D50419.ESTABELE"
+    ],
+    "Estabelecimentos5": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y5.D50419.ESTABELE"
+    ],
+    "Estabelecimentos6": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y6.D50419.ESTABELE"
+    ],
+    "Estabelecimentos7": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y7.D50419.ESTABELE"
+    ],
+    "Estabelecimentos8": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y8.D50419.ESTABELE"
+    ],
+    "Estabelecimentos9": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y9.D50419.ESTABELE"
+    ],
+    "Motivos": [
+        "/home/viana/Documents/cnpj_data/dados/F.K03200$Z.D50419.MOTICSV"
+    ],
+    "Municipios": [
+        "/home/viana/Documents/cnpj_data/dados/F.K03200$Z.D50419.MUNICCSV"
+    ],
+    "Naturezas": [
+        "/home/viana/Documents/cnpj_data/dados/F.K03200$Z.D50419.NATJUCSV"
+    ],
+    "Paises": [
+        "/home/viana/Documents/cnpj_data/dados/F.K03200$Z.D50419.PAISCSV"
+    ],
+    "Qualificacoes": [
+        "/home/viana/Documents/cnpj_data/dados/F.K03200$Z.D50419.QUALSCSV"
+    ],
+    "Simples": [
+        "/home/viana/Documents/cnpj_data/dados/F.K03200$W.SIMPLES.CSV.D50419"
+    ],
+    "Socios0": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y0.D50419.SOCIOCSV"
+    ],
+    "Socios1": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y1.D50419.SOCIOCSV"
+    ],
+    "Socios2": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y2.D50419.SOCIOCSV"
+    ],
+    "Socios3": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y3.D50419.SOCIOCSV"
+    ],
+    "Socios4": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y4.D50419.SOCIOCSV"
+    ],
+    "Socios5": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y5.D50419.SOCIOCSV"
+    ],
+    "Socios6": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y6.D50419.SOCIOCSV"
+    ],
+    "Socios7": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y7.D50419.SOCIOCSV"
+    ],
+    "Socios8": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y8.D50419.SOCIOCSV"
+    ],
+    "Socios9": [
+        "/home/viana/Documents/cnpj_data/dados/K3241.K03200Y9.D50419.SOCIOCSV"
+    ]
+}
+
 // Executar a aplicação
 main();

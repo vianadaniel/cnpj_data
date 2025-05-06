@@ -22,7 +22,7 @@ GET {{baseUrl}}/api/cnpj/12345678000199
 Content-Type: application/json
 
 ### Busca detalhada por CNPJ específico (com formatação)
-GET {{baseUrl}}/api/cnpj/12.345.678/0001-99
+GET {{baseUrl}}/api/cnpj/12345678000199
 Content-Type: application/json
 
 ### Obter lista de CNAEs (para filtros)

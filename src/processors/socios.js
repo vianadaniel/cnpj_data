@@ -1,4 +1,3 @@
-const readline = require('readline');
 const fs = require('fs');
 
 /**
@@ -7,94 +6,131 @@ const fs = require('fs');
  * @param {string} filePath - Caminho do arquivo a ser processado
  */
 async function processSociosFile(db, filePath) {
-    console.log(`Iniciando processamento de Sócios: ${filePath}`);
-
-    // Criar statement para inserção em lote
-    const stmt = await db.prepare(`
-        INSERT INTO socios (
-            cnpj_basico,
-            identificador_socio,
-            nome_socio,
-            cnpj_cpf_socio,
-            qualificacao_socio,
-            data_entrada_sociedade,
-            pais,
-            representante_legal,
-            nome_representante,
-            qualificacao_representante,
-            faixa_etaria
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    // Iniciar transação para melhor performance
-    await db.run('BEGIN TRANSACTION');
-
-    const fileStream = fs.createReadStream(filePath);
-    const rl = readline.createInterface({
-        input: fileStream,
-        crlfDelay: Infinity
-    });
-
-    let count = 0;
+    console.log(`Processando arquivo de socios: ${filePath}`);
 
     try {
-        for await (const line of rl) {
-            // Formato esperado do arquivo de Sócios
-            // CNPJ_BASICO;IDENTIFICADOR_SOCIO;NOME_SOCIO;CNPJ_CPF_SOCIO;QUALIFICACAO_SOCIO;DATA_ENTRADA_SOCIEDADE;PAIS;REPRESENTANTE_LEGAL;NOME_REPRESENTANTE;QUALIFICACAO_REPRESENTANTE;FAIXA_ETARIA
-            const parts = line.split(';');
+        // Set PRAGMA settings before any transaction begins
+        await db.run('PRAGMA synchronous = NORMAL'); // Less aggressive than OFF but still faster
+        await db.run('PRAGMA journal_mode = WAL'); // Write-Ahead Logging is more robust than MEMORY
+        await db.run('PRAGMA temp_store = MEMORY'); // Store temp tables in memory
+        await db.run('PRAGMA cache_size = 10000'); // Increase cache size for better performance
 
-            if (parts.length >= 11) {
-                const cnpjBasico = parts[0].trim();
-                const identificadorSocio = parts[1].trim();
-                const nomeSocio = parts[2].trim();
-                const cnpjCpfSocio = parts[3].trim();
-                const qualificacaoSocio = parts[4].trim();
-                const dataEntradaSociedade = parts[5].trim() || null;
-                const pais = parts[6].trim();
-                const representanteLegal = parts[7].trim();
-                const nomeRepresentante = parts[8].trim();
-                const qualificacaoRepresentante = parts[9].trim();
-                const faixaEtaria = parts[10].trim();
+        // Preparar statement para inserção em massa
+        const stmt = await db.prepare(`
+        INSERT OR REPLACE INTO socios (
+            cnpj_basico, identificador_socio, nome_socio, cnpj_cpf_socio,
+            qualificacao_socio, data_entrada_sociedade, pais, representante_legal,
+            nome_representante, qualificacao_representante, faixa_etaria
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
 
+        // Processar em lotes para melhor performance
+        const batchSize = 50000; // Reduced batch size for more frequent commits
+        let processed = 0;
+        let lineBuffer = '';
+
+        // Start transaction
+        await db.run('BEGIN TRANSACTION');
+
+        // Criar stream de leitura
+        const readStream = fs.createReadStream(filePath, { encoding: 'latin1' });
+
+        await new Promise((resolve, reject) => {
+            readStream.on('data', async (chunk) => {
                 try {
-                    await stmt.run(
-                        cnpjBasico,
-                        identificadorSocio,
-                        nomeSocio,
-                        cnpjCpfSocio,
-                        qualificacaoSocio,
-                        dataEntradaSociedade,
-                        pais,
-                        representanteLegal,
-                        nomeRepresentante,
-                        qualificacaoRepresentante,
-                        faixaEtaria
-                    );
-                    count++;
+                    // Pausar o stream para processar o chunk
+                    readStream.pause();
 
-                    // Commit a cada 10000 registros para não sobrecarregar a memória
-                    if (count % 10000 === 0) {
-                        await db.run('COMMIT');
-                        await db.run('BEGIN TRANSACTION');
-                        console.log(`Processados ${count} registros de Sócios`);
+                    lineBuffer += chunk;
+                    const lines = lineBuffer.split('\n');
+
+                    // O último elemento pode ser uma linha incompleta
+                    lineBuffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+
+                        // Parse da linha conforme layout dos dados
+                        const fields = line.split(';').map(field => field.replace(/^"|"$/g, ''));
+
+                        if (fields.length < 11) continue; // Ignorar linhas inválidas
+
+                        await stmt.run(
+                            fields[0],  // cnpj_basico
+                            fields[1],  // identificador_socio
+                            fields[2],  // nome_socio
+                            fields[3],  // cnpj_cpf_socio
+                            fields[4],  // qualificacao_socio
+                            fields[5],  // data_entrada_sociedade
+                            fields[6],  // pais
+                            fields[7],  // representante_legal
+                            fields[8],  // nome_representante
+                            fields[9],  // qualificacao_representante
+                            fields[10]  // faixa_etaria
+                        );
+
+                        processed++;
+
+                        if (processed % batchSize === 0) {
+                            await db.run('COMMIT');
+                            await db.run('BEGIN TRANSACTION');
+                            console.log(`Processados ${processed} registros de socios`);
+
+                            // Add a checkpoint to ensure WAL is written to the main database file
+                            await db.run('PRAGMA wal_checkpoint(PASSIVE)');
+                        }
                     }
-                } catch (error) {
-                    console.error(`Erro ao inserir Sócio ${nomeSocio} para CNPJ ${cnpjBasico}:`, error.message);
+
+                    // Retomar o stream
+                    readStream.resume();
+                } catch (err) {
+                    readStream.destroy(); // Ensure stream is closed on error
+                    reject(err);
                 }
-            }
-        }
+            });
 
-        // Commit final
-        await db.run('COMMIT');
-        console.log(`Processamento de Sócios concluído. Total: ${count} registros`);
+            readStream.on('end', async () => {
+                try {
+                    // Processar qualquer linha restante no buffer
+                    if (lineBuffer.trim()) {
+                        const fields = lineBuffer.trim().split(';').map(field => field.replace(/^"|"$/g, ''));
 
+                        if (fields.length >= 11) {
+                            await stmt.run(
+                                fields[0], fields[1], fields[2], fields[3], fields[4],
+                                fields[5], fields[6], fields[7], fields[8], fields[9],
+                                fields[10]
+                            );
+                            processed++;
+                        }
+                    }
+
+                    // Commit any remaining changes
+                    await db.run('COMMIT');
+                    console.log(`Processamento concluído. Total de ${processed} registros.`);
+
+                    // Finalize statement
+                    await stmt.finalize();
+
+                    resolve();
+                } catch (err) {
+                    reject(err);
+                }
+            });
+
+            readStream.on('error', (err) => {
+                reject(err);
+            });
+        });
     } catch (error) {
-        // Rollback em caso de erro
-        await db.run('ROLLBACK');
+        console.error(`Erro ao processar arquivo de socios: ${error.message}`);
+        // Try to rollback if possible
+        try {
+            await db.run('ROLLBACK');
+        } catch (rollbackError) {
+            console.error(`Erro ao fazer rollback: ${rollbackError.message}`);
+        }
         throw error;
-    } finally {
-        // Finalizar statement
-        await stmt.finalize();
     }
 }
 
