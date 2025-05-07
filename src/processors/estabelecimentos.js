@@ -1,34 +1,28 @@
 const fs = require('fs');
 const csv = require('csv-parser');
 
-// Função para processar arquivo de estabelecimentos e inserir no banco de dados
 async function processEstabelecimentosFile(db, filePath) {
     console.log(`Processando arquivo de estabelecimentos: ${filePath}`);
 
     try {
-        // Set PRAGMA settings before any transaction begins
-        await db.run('PRAGMA synchronous = NORMAL'); // Less aggressive than OFF but still faster
-        await db.run('PRAGMA journal_mode = WAL'); // Write-Ahead Logging is more robust than MEMORY
-        await db.run('PRAGMA temp_store = MEMORY'); // Store temp tables in memory
-        await db.run('PRAGMA cache_size = 10000'); // Increase cache size for better performance
+        await db.run('PRAGMA synchronous = NORMAL');
+        await db.run('PRAGMA journal_mode = WAL');
+        await db.run('PRAGMA temp_store = MEMORY');
+        await db.run('PRAGMA cache_size = 10000');
 
-        // Preparar statement para inserção em massa
         const stmt = await db.prepare(`
         INSERT OR REPLACE INTO estabelecimentos (
-            cnpj_basico, cnpj_ordem, cnpj_dv, matriz_filial, nome_fantasia,
+            cnpj_basico, cnpj_ordem, cnpj_dv, nome_fantasia,
             situacao_cadastral, data_situacao_cadastral, motivo_situacao_cadastral,
-            nome_cidade_exterior, pais, data_inicio_atividade, cnae_fiscal_principal,
-            cnae_fiscal_secundaria, tipo_logradouro, logradouro, numero, complemento,
-            bairro, cep, uf, municipio, ddd_1, telefone_1, ddd_2, telefone_2,
-            ddd_fax, fax, email, situacao_especial, data_situacao_especial
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            cidade_exterior, pais, data_inicio_atividade, cnae_principal,
+            cnaes_secundarios, tipo_logradouro, logradouro, numero, complemento,
+            bairro, cep, uf, municipio, ddd1, telefone1, ddd2, telefone2, email
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
-        // Processar em lotes para melhor performance
-        const batchSize = 5000000; // Reduced batch size for more frequent commits
+        const batchSize = 5000000;
         let processed = 0;
 
-        // Start transaction
         await db.run('BEGIN TRANSACTION');
 
         await new Promise((resolve, reject) => {
@@ -46,17 +40,14 @@ async function processEstabelecimentosFile(db, filePath) {
                     skipLines: 0
                 }));
 
-            // Handle data events
             stream.on('data', async (row) => {
                 try {
-                    // Pause the stream while we process this row
                     stream.pause();
 
                     await stmt.run(
                         row.cnpj_basico,
                         row.cnpj_ordem,
                         row.cnpj_dv,
-                        row.matriz_filial,
                         row.nome_fantasia,
                         row.situacao_cadastral,
                         row.data_situacao_cadastral,
@@ -78,11 +69,7 @@ async function processEstabelecimentosFile(db, filePath) {
                         row.telefone_1,
                         row.ddd_2,
                         row.telefone_2,
-                        row.ddd_fax,
-                        row.fax,
-                        row.email,
-                        row.situacao_especial,
-                        row.data_situacao_especial
+                        row.email
                     );
 
                     processed++;
@@ -91,12 +78,9 @@ async function processEstabelecimentosFile(db, filePath) {
                         await db.run('COMMIT');
                         await db.run('BEGIN TRANSACTION');
                         console.log(`Processados ${processed} registros de estabelecimentos`);
-
-                        // Add a checkpoint to ensure WAL is written to the main database file
                         await db.run('PRAGMA wal_checkpoint(PASSIVE)');
                     }
 
-                    // Resume the stream
                     stream.resume();
                 } catch (err) {
                     stream.destroy(err);
@@ -106,13 +90,9 @@ async function processEstabelecimentosFile(db, filePath) {
 
             stream.on('end', async () => {
                 try {
-                    // Commit any remaining changes
                     await db.run('COMMIT');
                     console.log(`Processamento concluído. Total de ${processed} registros.`);
-
-                    // Finalize statement
                     await stmt.finalize();
-
                     resolve();
                 } catch (err) {
                     reject(err);
@@ -125,7 +105,6 @@ async function processEstabelecimentosFile(db, filePath) {
         });
     } catch (error) {
         console.error(`Erro ao processar arquivo de estabelecimentos: ${error.message}`);
-        // Try to rollback if possible
         try {
             await db.run('ROLLBACK');
         } catch (rollbackError) {
