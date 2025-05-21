@@ -17,7 +17,7 @@ const { processSociosFile } = require('./src/processors/socios');
 // Função principal para processamento
 async function processExtractedFiles() {
     try {
-        console.log('Iniciando processamento de dados CNPJ para SQLite');
+        console.log('Iniciando processamento de dados CNPJ para PostgreSQL');
 
         // Ler informações sobre arquivos extraídos
         const extractInfoDir = path.join(__dirname, 'extracted_files_info');
@@ -33,58 +33,61 @@ async function processExtractedFiles() {
             process.exit(1);
         }
 
-        // Criar banco de dados
-        const db = await createDatabase();
+        // Criar banco de dados e índices
+        await createDatabase();
+        await createAdditionalIndices();
 
-        // Processar cada arquivo extraído
-        for (const [fileName, extractedFiles] of Object.entries(extractedFilesInfo)) {
-            if (extractedFiles.length === 0) {
-                console.warn(`Nenhum arquivo extraído encontrado para ${fileName}`);
-                continue;
-            }
+        // Processar arquivos de referência primeiro
+        console.log('Processando arquivos de referência...');
+        if (extractedFilesInfo.Cnaes?.[0]) await processCnaeFile(extractedFilesInfo.Cnaes[0], true);
+        if (extractedFilesInfo.Motivos?.[0]) await processMotivosFile(extractedFilesInfo.Motivos[0], true);
+        if (extractedFilesInfo.Municipios?.[0]) await processMunicipiosFile(extractedFilesInfo.Municipios[0], true);
+        if (extractedFilesInfo.Naturezas?.[0]) await processNaturezasFile(extractedFilesInfo.Naturezas[0], true);
+        if (extractedFilesInfo.Paises?.[0]) await processPaisesFile(extractedFilesInfo.Paises[0], true);
+        if (extractedFilesInfo.Qualificacoes?.[0]) await processQualificacoesFile(extractedFilesInfo.Qualificacoes[0], true);
 
-            // Usar o primeiro arquivo extraído
-            const finalFilePath = extractedFiles[0];
-            console.log(`Processando arquivo: ${finalFilePath}`);
+        // Processar arquivos principais
+        console.log('Processando arquivos principais...');
 
-            // Processar o arquivo conforme seu tipo
-            if (fileName.startsWith('Empresas')) {
-                await processEmpresasFile(db, finalFilePath);
-            } else if (fileName.startsWith('Estabelecimentos')) {
-                await processEstabelecimentosFile(db, finalFilePath);
-            } else if (fileName.startsWith('CNAE')) {
-                await processCnaeFile(db, finalFilePath);
-            } else if (fileName.startsWith('Motivos')) {
-                await processMotivosFile(db, finalFilePath);
-            } else if (fileName.startsWith('Municipios')) {
-                await processMunicipiosFile(db, finalFilePath);
-            } else if (fileName.startsWith('Naturezas')) {
-                await processNaturezasFile(db, finalFilePath);
-            } else if (fileName.startsWith('Paises')) {
-                await processPaisesFile(db, finalFilePath);
-            } else if (fileName.startsWith('Qualificacoes')) {
-                await processQualificacoesFile(db, finalFilePath);
-            } else if (fileName.startsWith('Simples')) {
-                await processSimplesFile(db, finalFilePath);
-            } else if (fileName.startsWith('Socios')) {
-                await processSociosFile(db, finalFilePath);
+        // Processar empresas primeiro
+        console.log('Processando arquivos de empresas...');
+        for (let i = 0; i <= 9; i++) {
+            const fileKey = `Empresas${i}`;
+            if (extractedFilesInfo[fileKey]?.[0]) {
+                console.log(`Processando arquivo de empresas ${i}...`);
+                await processEmpresasFile(extractedFilesInfo[fileKey][0]);
             }
         }
 
-        // Criar índices adicionais para melhorar performance
-        await createAdditionalIndices(db);
+        // Processar estabelecimentos depois
+        console.log('Processando arquivos de estabelecimentos...');
+        for (let i = 0; i <= 9; i++) {
+            const fileKey = `Estabelecimentos${i}`;
+            if (extractedFilesInfo[fileKey]?.[0]) {
+                console.log(`Processando arquivo de estabelecimentos ${i}...`);
+                await processEstabelecimentosFile(extractedFilesInfo[fileKey][0]);
+            }
+        }
 
-        console.log('Fechando conexão com o banco de dados');
-        await db.close();
+        // Processar Simples Nacional
+        if (extractedFilesInfo.Simples?.[0]) {
+            await processSimplesFile(extractedFilesInfo.Simples[0], true);
+        }
+
+        // Processar sócios
+        for (let i = 0; i <= 9; i++) {
+            const fileKey = `Socios${i}`;
+            if (extractedFilesInfo[fileKey]?.[0]) {
+                await processSociosFile(extractedFilesInfo[fileKey][0], true);
+            }
+        }
 
         console.log('Processamento concluído com sucesso!');
-        console.log(`Banco de dados disponível em: ${config.dbPath}`);
-
     } catch (error) {
         console.error('Erro durante o processamento:', error);
         process.exit(1);
     }
 }
 
-// Executar o processamento
+// Executar processamento
 processExtractedFiles();

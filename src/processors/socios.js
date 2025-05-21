@@ -1,116 +1,228 @@
 const fs = require('fs');
+const { pool } = require('../database/schema');
 const csv = require('csv-parser');
 
 /**
- * Processa um arquivo de Sócios e insere os dados no banco de dados
- * @param {Object} db - Conexão com o banco de dados
+ * Processa um arquivo de sócios e insere os dados no banco de dados
  * @param {string} filePath - Caminho do arquivo a ser processado
+ * @param {boolean} testMode - Se true, processa apenas a primeira linha
  */
-async function processSociosFile(db, filePath) {
-    console.log(`Processando arquivo de socios: ${filePath}`);
+async function processSociosFile(filePath, testMode = false) {
+    console.log(`Iniciando processamento de sócios: ${filePath}`);
+    if (testMode) {
+        console.log('Modo de teste ativado - processando apenas uma linha');
+    }
+
+    const client = await pool.connect();
 
     try {
-        // Set PRAGMA settings before any transaction begins
-        await db.run('PRAGMA synchronous = NORMAL'); // Less aggressive than OFF but still faster
-        await db.run('PRAGMA journal_mode = WAL'); // Write-Ahead Logging is more robust than MEMORY
-        await db.run('PRAGMA temp_store = MEMORY'); // Store temp tables in memory
-        await db.run('PRAGMA cache_size = 10000'); // Increase cache size for better performance
-
-        // Preparar statement para inserção em massa
-        const stmt = await db.prepare(`
-        INSERT OR REPLACE INTO socios (
-            cnpj_basico, identificador_socio, nome_socio, cnpj_cpf_socio,
-            qualificacao_socio, data_entrada_sociedade, pais, representante_legal,
-            nome_representante, qualificacao_representante, faixa_etaria
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        // Processar em lotes para melhor performance
-        const batchSize = 5000000; // Reduced batch size for more frequent commits
+        console.log('Iniciando processamento...');
         let processed = 0;
+        const BATCH_SIZE = 1000;
+        let batch = [];
 
-        // Start transaction
-        await db.run('BEGIN TRANSACTION');
+        // Criar stream de leitura com csv-parser
+        const stream = fs.createReadStream(filePath, { encoding: 'latin1' })
+            .pipe(csv({
+                separator: ';',
+                headers: [
+                    'cnpj', 'identificador_socio', 'nome_socio', 'cpf_cnpj_socio',
+                    'qualificacao_socio', 'data_entrada_sociedade', 'pais',
+                    'representante_legal', 'nome_representante', 'qualificacao_representante',
+                    'faixa_etaria'
+                ],
+                skipLines: 0
+            }));
 
-        await new Promise((resolve, reject) => {
-            const stream = fs.createReadStream(filePath, { encoding: 'latin1' })
-                .pipe(csv({
-                    separator: ';',
-                    headers: [
-                        'cnpj_basico', 'identificador_socio', 'nome_socio', 'cnpj_cpf_socio',
-                        'qualificacao_socio', 'data_entrada_sociedade', 'pais', 'representante_legal',
-                        'nome_representante', 'qualificacao_representante', 'faixa_etaria'
-                    ],
-                    skipLines: 0
-                }));
+        // Processar cada linha do CSV
+        for await (const row of stream) {
+            if (row.cnpj) {
+                batch.push([
+                    row.cnpj,
+                    row.identificador_socio,
+                    row.nome_socio,
+                    row.cpf_cnpj_socio,
+                    row.qualificacao_socio,
+                    row.data_entrada_sociedade,
+                    row.pais,
+                    row.representante_legal,
+                    row.nome_representante,
+                    row.qualificacao_representante,
+                    row.faixa_etaria
+                ]);
 
-            // Handle data events
-            stream.on('data', async (row) => {
-                try {
-                    // Pause the stream while we process this row
-                    stream.pause();
+                if (batch.length >= BATCH_SIZE || testMode) {
+                    await client.query('BEGIN');
+                    try {
+                        // Criar tabela temporária para COPY
+                        await client.query(`
+                            CREATE TEMP TABLE temp_socios (
+                                cnpj TEXT,
+                                identificador_socio TEXT,
+                                nome_socio TEXT,
+                                cpf_cnpj_socio TEXT,
+                                qualificacao_socio TEXT,
+                                data_entrada_sociedade TEXT,
+                                pais TEXT,
+                                representante_legal TEXT,
+                                nome_representante TEXT,
+                                qualificacao_representante TEXT,
+                                faixa_etaria TEXT
+                            ) ON COMMIT DROP
+                        `);
 
-                    await stmt.run(
-                        row.cnpj_basico,
-                        row.identificador_socio,
-                        row.nome_socio,
-                        row.cnpj_cpf_socio,
-                        row.qualificacao_socio,
-                        row.data_entrada_sociedade,
-                        row.pais,
-                        row.representante_legal,
-                        row.nome_representante,
-                        row.qualificacao_representante,
-                        row.faixa_etaria
-                    );
+                        const values = [];
+                        const placeholders = [];
+                        let paramCount = 1;
 
-                    processed++;
+                        for (const record of batch) {
+                            values.push(...record);
+                            placeholders.push(`($${paramCount}, $${paramCount + 1}, $${paramCount + 2}, $${paramCount + 3}, $${paramCount + 4}, $${paramCount + 5}, $${paramCount + 6}, $${paramCount + 7}, $${paramCount + 8}, $${paramCount + 9}, $${paramCount + 10})`);
+                            paramCount += 11;
+                        }
 
-                    if (processed % batchSize === 0) {
-                        await db.run('COMMIT');
-                        await db.run('BEGIN TRANSACTION');
-                        console.log(`Processados ${processed} registros de socios`);
+                        await client.query(`
+                            INSERT INTO temp_socios (
+                                cnpj, identificador_socio, nome_socio, cpf_cnpj_socio,
+                                qualificacao_socio, data_entrada_sociedade, pais,
+                                representante_legal, nome_representante, qualificacao_representante,
+                                faixa_etaria
+                            )
+                            VALUES ${placeholders.join(', ')}
+                        `, values);
 
-                        // Add a checkpoint to ensure WAL is written to the main database file
-                        await db.run('PRAGMA wal_checkpoint(PASSIVE)');
+                        // Inserir dados da tabela temporária na tabela final
+                        await client.query(`
+                            INSERT INTO socios (
+                                cnpj, identificador_socio, nome_socio, cpf_cnpj_socio,
+                                qualificacao_socio, data_entrada_sociedade, pais,
+                                representante_legal, nome_representante, qualificacao_representante,
+                                faixa_etaria
+                            )
+                            SELECT
+                                cnpj, identificador_socio, nome_socio, cpf_cnpj_socio,
+                                qualificacao_socio, data_entrada_sociedade, pais,
+                                representante_legal, nome_representante, qualificacao_representante,
+                                faixa_etaria
+                            FROM temp_socios
+                            ON CONFLICT (cnpj, cpf_cnpj_socio) DO UPDATE
+                            SET identificador_socio = EXCLUDED.identificador_socio,
+                                nome_socio = EXCLUDED.nome_socio,
+                                qualificacao_socio = EXCLUDED.qualificacao_socio,
+                                data_entrada_sociedade = EXCLUDED.data_entrada_sociedade,
+                                pais = EXCLUDED.pais,
+                                representante_legal = EXCLUDED.representante_legal,
+                                nome_representante = EXCLUDED.nome_representante,
+                                qualificacao_representante = EXCLUDED.qualificacao_representante,
+                                faixa_etaria = EXCLUDED.faixa_etaria
+                        `);
+
+                        await client.query('COMMIT');
+
+                        processed += batch.length;
+                        console.log(`Processados ${processed} registros de sócios`);
+
+                        if (testMode) {
+                            break; // Sai do loop após processar a primeira linha em modo de teste
+                        }
+                    } catch (error) {
+                        await client.query('ROLLBACK');
+                        console.error('Erro ao processar lote:', error);
+                        throw error;
                     }
-
-                    // Resume the stream
-                    stream.resume();
-                } catch (err) {
-                    stream.destroy(err);
-                    reject(err);
+                    batch = [];
                 }
-            });
-
-            stream.on('end', async () => {
-                try {
-                    // Commit any remaining changes
-                    await db.run('COMMIT');
-                    console.log(`Processamento concluído. Total de ${processed} registros.`);
-
-                    // Finalize statement
-                    await stmt.finalize();
-
-                    resolve();
-                } catch (err) {
-                    reject(err);
-                }
-            });
-
-            stream.on('error', (err) => {
-                reject(err);
-            });
-        });
-    } catch (error) {
-        console.error(`Erro ao processar arquivo de socios: ${error.message}`);
-        // Try to rollback if possible
-        try {
-            await db.run('ROLLBACK');
-        } catch (rollbackError) {
-            console.error(`Erro ao fazer rollback: ${rollbackError.message}`);
+            }
         }
+
+        // Processar registros restantes no batch
+        if (batch.length > 0) {
+            await client.query('BEGIN');
+            try {
+                // Criar tabela temporária para COPY
+                await client.query(`
+                    CREATE TEMP TABLE temp_socios (
+                        cnpj TEXT,
+                        identificador_socio TEXT,
+                        nome_socio TEXT,
+                        cpf_cnpj_socio TEXT,
+                        qualificacao_socio TEXT,
+                        data_entrada_sociedade TEXT,
+                        pais TEXT,
+                        representante_legal TEXT,
+                        nome_representante TEXT,
+                        qualificacao_representante TEXT,
+                        faixa_etaria TEXT
+                    ) ON COMMIT DROP
+                `);
+
+                const values = [];
+                const placeholders = [];
+                let paramCount = 1;
+
+                for (const record of batch) {
+                    values.push(...record);
+                    placeholders.push(`($${paramCount}, $${paramCount + 1}, $${paramCount + 2}, $${paramCount + 3}, $${paramCount + 4}, $${paramCount + 5}, $${paramCount + 6}, $${paramCount + 7}, $${paramCount + 8}, $${paramCount + 9}, $${paramCount + 10})`);
+                    paramCount += 11;
+                }
+
+                await client.query(`
+                    INSERT INTO temp_socios (
+                        cnpj, identificador_socio, nome_socio, cpf_cnpj_socio,
+                        qualificacao_socio, data_entrada_sociedade, pais,
+                        representante_legal, nome_representante, qualificacao_representante,
+                        faixa_etaria
+                    )
+                    VALUES ${placeholders.join(', ')}
+                `, values);
+
+                // Inserir dados da tabela temporária na tabela final
+                await client.query(`
+                    INSERT INTO socios (
+                        cnpj, identificador_socio, nome_socio, cpf_cnpj_socio,
+                        qualificacao_socio, data_entrada_sociedade, pais,
+                        representante_legal, nome_representante, qualificacao_representante,
+                        faixa_etaria
+                    )
+                    SELECT
+                        cnpj, identificador_socio, nome_socio, cpf_cnpj_socio,
+                        qualificacao_socio, data_entrada_sociedade, pais,
+                        representante_legal, nome_representante, qualificacao_representante,
+                        faixa_etaria
+                    FROM temp_socios
+                    ON CONFLICT (cnpj, cpf_cnpj_socio) DO UPDATE
+                    SET identificador_socio = EXCLUDED.identificador_socio,
+                        nome_socio = EXCLUDED.nome_socio,
+                        qualificacao_socio = EXCLUDED.qualificacao_socio,
+                        data_entrada_sociedade = EXCLUDED.data_entrada_sociedade,
+                        pais = EXCLUDED.pais,
+                        representante_legal = EXCLUDED.representante_legal,
+                        nome_representante = EXCLUDED.nome_representante,
+                        qualificacao_representante = EXCLUDED.qualificacao_representante,
+                        faixa_etaria = EXCLUDED.faixa_etaria
+                `);
+
+                await client.query('COMMIT');
+
+                processed += batch.length;
+                console.log(`Processados registros finais: ${batch.length}`);
+            } catch (error) {
+                await client.query('ROLLBACK');
+                console.error('Erro ao processar lote final:', error);
+                throw error;
+            }
+        }
+
+        // Verificar dados na tabela final
+        const finalCount = await client.query('SELECT COUNT(*) FROM socios');
+        console.log(`Total de registros na tabela final: ${finalCount.rows[0].count}`);
+        console.log(`Processamento de sócios concluído. Total processado: ${processed} registros`);
+
+    } catch (error) {
+        console.error('Erro ao processar arquivo de sócios:', error);
         throw error;
+    } finally {
+        client.release();
     }
 }
 

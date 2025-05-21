@@ -2,7 +2,11 @@ const path = require('path');
 
 module.exports = {
     downloadDir: path.join(__dirname, '..', 'dados'),
-    dbPath: path.join(__dirname, '..', 'cnpj.db'),
+    dbUser: process.env.DB_USER || 'cnpj',
+    dbHost: process.env.DB_HOST || '3.91.197.56',
+    dbName: process.env.DB_NAME || 'cnpjdb',
+    dbPassword: process.env.DB_PASSWORD || 'cnpj123',
+    dbPort: process.env.DB_PORT || 5432,
     baseUrl: 'https://dados-abertos-rf-cnpj.casadosdados.com.br/arquivos/2025-04-19',
     // Lista completa de arquivos a serem baixados
     filesToDownload: [

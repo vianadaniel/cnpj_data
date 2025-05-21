@@ -1,5 +1,5 @@
 ### Variáveis
-@baseUrl = http://localhost:3000
+@baseUrl = http://localhost:3003
 
 ### Busca paginada de CNPJs (sem filtro)
 GET {{baseUrl}}/api/cnpj?page=1&limit=10

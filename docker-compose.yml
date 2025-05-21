@@ -1,0 +1,63 @@
+# @format
+
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cnpj_data_app
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_USER=cnpj
+      - DB_PASSWORD=cnpj123
+      - DB_NAME=cnpjdb
+      - DB_PORT=5432
+    depends_on:
+      - postgres
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    networks:
+      - cnpj-network
+
+  postgres:
+    image: postgres:14-alpine
+    container_name: cnpj_data_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=cnpj
+      - POSTGRES_PASSWORD=cnpj123
+      - POSTGRES_DB=cnpjdb
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cnpj-network
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: cnpj_data_pgadmin
+    restart: unless-stopped
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@admin.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    ports:
+      - '5050:80'
+    depends_on:
+      - postgres
+    networks:
+      - cnpj-network
+
+networks:
+  cnpj-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

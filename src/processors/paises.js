@@ -1,71 +1,129 @@
-const readline = require('readline');
 const fs = require('fs');
+const { pool } = require('../database/schema');
+const csv = require('csv-parser');
 
 /**
- * Processa um arquivo de Países e insere os dados no banco de dados
- * @param {Object} db - Conexão com o banco de dados
+ * Processa um arquivo de países e insere os dados no banco de dados
  * @param {string} filePath - Caminho do arquivo a ser processado
  */
-async function processPaisesFile(db, filePath) {
-    console.log(`Iniciando processamento de Países: ${filePath}`);
+async function processPaisesFile(filePath) {
+    console.log(`Iniciando processamento de países: ${filePath}`);
 
-    // Criar statement para inserção em lote
-    const stmt = await db.prepare(`
-        INSERT INTO paises (
-            codigo,
-            nome
-        ) VALUES (?, ?)
-    `);
-
-    // Iniciar transação para melhor performance
-    await db.run('BEGIN TRANSACTION');
-
-    const fileStream = fs.createReadStream(filePath);
-    const rl = readline.createInterface({
-        input: fileStream,
-        crlfDelay: Infinity
-    });
-
-    let count = 0;
+    const client = await pool.connect();
 
     try {
-        for await (const line of rl) {
-            // Formato esperado do arquivo de Países
-            // Código;Nome
-            const parts = line.split(';');
+        await client.query('BEGIN');
 
-            if (parts.length >= 2) {
-                const codigo = parts[0].trim();
-                const nome = parts[1].trim();
+        // Criar tabela temporária para COPY
+        await client.query(`
+            CREATE TEMP TABLE temp_paises (
+                codigo TEXT,
+                nome TEXT
+            ) ON COMMIT DROP
+        `);
 
-                try {
-                    await stmt.run(codigo, nome);
-                    count++;
+        console.log('Iniciando processamento...');
+        let processed = 0;
+        const BATCH_SIZE = 1000;
+        let batch = [];
 
-                    // Commit a cada 1000 registros
-                    // (Países geralmente tem poucos registros)
-                    if (count % 1000 === 0) {
-                        await db.run('COMMIT');
-                        await db.run('BEGIN TRANSACTION');
-                        console.log(`Processados ${count} registros de Países`);
+        // Criar stream de leitura com csv-parser
+        const stream = fs.createReadStream(filePath, { encoding: 'latin1' })
+            .pipe(csv({
+                separator: ';',
+                headers: ['codigo', 'nome'],
+                skipLines: 0
+            }));
+
+        // Processar cada linha do CSV
+        for await (const row of stream) {
+            if (row.codigo && row.nome) {
+                // Debug log para verificar os dados
+                if (processed < 5) {
+                    console.log('Dados sendo processados:', {
+                        original: row
+                    });
+                }
+
+                batch.push([row.codigo, row.nome]);
+
+                if (batch.length >= BATCH_SIZE) {
+                    const values = [];
+                    const placeholders = [];
+                    let paramCount = 1;
+
+                    for (const [codigo, nome] of batch) {
+                        values.push(codigo, nome);
+                        placeholders.push(`($${paramCount}, $${paramCount + 1})`);
+                        paramCount += 2;
                     }
-                } catch (error) {
-                    console.error(`Erro ao inserir País ${codigo} - ${nome}:`, error.message);
+
+                    await client.query(`
+                        INSERT INTO temp_paises (codigo, nome)
+                        VALUES ${placeholders.join(', ')}
+                    `, values);
+
+                    processed += batch.length;
+                    batch = [];
+                    console.log(`Processados ${processed} registros de países`);
                 }
             }
         }
 
-        // Commit final
-        await db.run('COMMIT');
-        console.log(`Processamento de Países concluído. Total: ${count} registros`);
+        // Processar registros restantes no batch
+        if (batch.length > 0) {
+            const values = [];
+            const placeholders = [];
+            let paramCount = 1;
+
+            for (const [codigo, nome] of batch) {
+                values.push(codigo, nome);
+                placeholders.push(`($${paramCount}, $${paramCount + 1})`);
+                paramCount += 2;
+            }
+
+            await client.query(`
+                INSERT INTO temp_paises (codigo, nome)
+                VALUES ${placeholders.join(', ')}
+            `, values);
+
+            processed += batch.length;
+            console.log(`Processados registros finais: ${batch.length}`);
+        }
+
+        // Verificar dados na tabela temporária
+        const tempCount = await client.query('SELECT COUNT(*) FROM temp_paises');
+        console.log(`Registros na tabela temporária: ${tempCount.rows[0].count}`);
+
+        if (tempCount.rows[0].count === 0) {
+            throw new Error('Nenhum registro foi inserido na tabela temporária');
+        }
+
+        console.log('Iniciando inserção na tabela final...');
+        // Inserir dados da tabela temporária na tabela final
+        const result = await client.query(`
+            INSERT INTO paises (codigo, nome)
+            SELECT codigo, nome FROM temp_paises
+            ON CONFLICT (codigo) DO UPDATE
+            SET nome = EXCLUDED.nome
+            RETURNING codigo
+        `);
+
+        console.log(`Registros inseridos/atualizados: ${result.rowCount}`);
+
+        // Verificar dados na tabela final
+        const finalCount = await client.query('SELECT COUNT(*) FROM paises');
+        console.log(`Total de registros na tabela final: ${finalCount.rows[0].count}`);
+
+        await client.query('COMMIT');
+        console.log(`Processamento de países concluído. Total processado: ${processed} registros`);
 
     } catch (error) {
-        // Rollback em caso de erro
-        await db.run('ROLLBACK');
+        await client.query('ROLLBACK');
+        console.error('Erro ao processar arquivo de países:', error);
         throw error;
     } finally {
-        // Finalizar statement
-        await stmt.finalize();
+        client.release();
     }
 }
 

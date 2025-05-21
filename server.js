@@ -1,25 +1,23 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
-const { open } = require('sqlite');
+const { Pool } = require('pg');
 const config = require('./src/config');
 const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3003;
 
 // Middleware
 app.use(express.json());
 app.use(cors());
 
 // Conexão com o banco de dados
-let db;
-async function setupDatabase() {
-    db = await open({
-        filename: config.dbPath,
-        driver: sqlite3.Database
-    });
-    console.log('Conexão com o banco de dados estabelecida');
-}
+const pool = new Pool({
+    user: config.dbUser,
+    host: config.dbHost,
+    database: config.dbName,
+    password: config.dbPassword,
+    port: config.dbPort,
+});
 
 // Rota principal para busca de dados com paginação
 app.get('/api/cnpj', async (req, res) => {
@@ -63,27 +61,27 @@ app.get('/api/cnpj', async (req, res) => {
 
         if (termo) {
             conditions.push(`(
-        est.cnpj_completo LIKE ? OR
-        e.razao_social LIKE ? OR
-        est.nome_fantasia LIKE ? OR
-        EXISTS (SELECT 1 FROM socios s WHERE s.cnpj_basico = e.cnpj_basico AND s.nome_socio LIKE ?)
+        est.cnpj_completo ILIKE $${params.length + 1} OR
+        e.razao_social ILIKE $${params.length + 2} OR
+        est.nome_fantasia ILIKE $${params.length + 3} OR
+        EXISTS (SELECT 1 FROM socios s WHERE s.cnpj_basico = e.cnpj_basico AND s.nome_socio ILIKE $${params.length + 4})
       )`);
             const termoBusca = `%${termo}%`;
             params.push(termoBusca, termoBusca, termoBusca, termoBusca);
         }
 
         if (uf) {
-            conditions.push('est.uf = ?');
+            conditions.push(`est.uf = $${params.length + 1}`);
             params.push(uf);
         }
 
         if (situacao) {
-            conditions.push('est.situacao_cadastral = ?');
+            conditions.push(`est.situacao_cadastral = $${params.length + 1}`);
             params.push(situacao);
         }
 
         if (cnae) {
-            conditions.push('est.cnae_principal = ?');
+            conditions.push(`est.cnae_principal = $${params.length + 1}`);
             params.push(cnae);
         }
 
@@ -93,35 +91,23 @@ app.get('/api/cnpj', async (req, res) => {
 
         // Consulta para contagem total
         const countQuery = `SELECT COUNT(*) as total FROM (${query})`;
-        const countResult = await db.get(countQuery, params);
+        const countResult = await pool.query(countQuery, params);
 
         // Consulta principal com paginação
-        query += ` ORDER BY e.razao_social LIMIT ? OFFSET ?`;
-        params.push(parseInt(limit), parseInt(offset));
+        query += ` ORDER BY e.razao_social LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+        params.push(limit, offset);
 
-        const rows = await db.all(query, params);
-
-        // Buscar sócios para cada empresa encontrada
-        for (const row of rows) {
-            const socios = await db.all(`
-        SELECT nome_socio, qualificacao_socio, cnpj_cpf_socio
-        FROM socios
-        WHERE cnpj_basico = ?
-      `, [row.cnpj_basico]);
-
-            row.socios = socios;
-        }
+        const result = await pool.query(query, params);
 
         res.json({
-            total: countResult.total,
+            total: parseInt(countResult.rows[0].total),
             page: parseInt(page),
             limit: parseInt(limit),
-            totalPages: Math.ceil(countResult.total / limit),
-            data: rows
+            data: result.rows
         });
     } catch (error) {
-        console.error('Erro na consulta:', error);
-        res.status(500).json({ error: 'Erro ao buscar dados' });
+        console.error('Erro na busca:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
     }
 });
 
@@ -140,58 +126,58 @@ app.get('/api/cnpj/:cnpj', async (req, res) => {
         const cnpjBasico = cnpjLimpo.substring(0, 8);
 
         // Buscar dados da empresa
-        const empresa = await db.get(`
-      SELECT * FROM empresas WHERE cnpj_basico = ?
+        const empresa = await pool.query(`
+      SELECT * FROM empresas WHERE cnpj_basico = $1
     `, [cnpjBasico]);
 
-        if (!empresa) {
+        if (empresa.rows.length === 0) {
             return res.status(404).json({ error: 'Empresa não encontrada' });
         }
 
         // Buscar estabelecimento
-        const estabelecimento = await db.get(`
-      SELECT * FROM estabelecimentos WHERE cnpj_completo = ?
+        const estabelecimento = await pool.query(`
+      SELECT * FROM estabelecimentos WHERE cnpj_completo = $1
     `, [cnpjLimpo]);
 
         // Buscar sócios
-        const socios = await db.all(`
-      SELECT * FROM socios WHERE cnpj_basico = ?
+        const socios = await pool.query(`
+      SELECT * FROM socios WHERE cnpj_basico = $1
     `, [cnpjBasico]);
 
         // Buscar dados do Simples Nacional
-        const simples = await db.get(`
-      SELECT * FROM simples WHERE cnpj_basico = ?
+        const simples = await pool.query(`
+      SELECT * FROM simples WHERE cnpj_basico = $1
     `, [cnpjBasico]);
 
         // Buscar descrição do CNAE principal
         let cnaeDescricao = null;
-        if (estabelecimento && estabelecimento.cnae_principal) {
-            const cnaeResult = await db.get(`
-        SELECT descricao FROM cnae WHERE codigo = ?
-      `, [estabelecimento.cnae_principal]);
+        if (estabelecimento.rows.length > 0 && estabelecimento.rows[0].cnae_principal) {
+            const cnaeResult = await pool.query(`
+        SELECT descricao FROM cnae WHERE codigo = $1
+      `, [estabelecimento.rows[0].cnae_principal]);
 
-            if (cnaeResult) {
-                cnaeDescricao = cnaeResult.descricao;
+            if (cnaeResult.rows.length > 0) {
+                cnaeDescricao = cnaeResult.rows[0].descricao;
             }
         }
 
         // Buscar descrição da natureza jurídica
         let naturezaJuridicaDescricao = null;
-        if (empresa && empresa.natureza_juridica) {
-            const naturezaResult = await db.get(`
-        SELECT descricao FROM naturezas_juridicas WHERE codigo = ?
-      `, [empresa.natureza_juridica]);
+        if (empresa.rows.length > 0 && empresa.rows[0].natureza_juridica) {
+            const naturezaResult = await pool.query(`
+        SELECT descricao FROM naturezas_juridicas WHERE codigo = $1
+      `, [empresa.rows[0].natureza_juridica]);
 
-            if (naturezaResult) {
-                naturezaJuridicaDescricao = naturezaResult.descricao;
+            if (naturezaResult.rows.length > 0) {
+                naturezaJuridicaDescricao = naturezaResult.rows[0].descricao;
             }
         }
 
         res.json({
-            empresa,
-            estabelecimento,
-            socios,
-            simples,
+            empresa: empresa.rows[0],
+            estabelecimento: estabelecimento.rows[0],
+            socios: socios.rows,
+            simples: simples.rows[0],
             cnae_descricao: cnaeDescricao,
             natureza_juridica_descricao: naturezaJuridicaDescricao
         });
@@ -215,24 +201,33 @@ app.get('/api/auxiliares/:tabela', async (req, res) => {
             return res.status(400).json({ error: 'Tabela não permitida' });
         }
 
-        const rows = await db.all(`SELECT * FROM ${tabela}`);
-        res.json(rows);
+        const rows = await pool.query(`SELECT * FROM ${tabela}`);
+        res.json(rows.rows);
     } catch (error) {
         console.error(`Erro ao buscar dados da tabela ${req.params.tabela}:`, error);
         res.status(500).json({ error: 'Erro ao buscar dados auxiliares' });
     }
 });
 
-// Inicialização do servidor
+// Após a definição do pool, adicione:
+pool.on('error', (err) => {
+    console.error('Erro inesperado no pool de conexão:', err);
+});
+
+// Teste a conexão antes de iniciar o servidor
 async function startServer() {
     try {
-        await setupDatabase();
+        // Teste de conexão com o banco
+        const client = await pool.connect();
+        console.log('Conexão com o banco de dados estabelecida com sucesso');
+        client.release();
 
         app.listen(PORT, () => {
             console.log(`Servidor rodando na porta ${PORT}`);
         });
     } catch (error) {
         console.error('Erro ao iniciar o servidor:', error);
+        process.exit(1);
     }
 }
 
